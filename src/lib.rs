@@ -171,12 +171,12 @@ mod tests {
     use super::*;
 
     fn get_file() -> BufReader<File> {
-        BufReader::new(File::open("olympic.sas7bdat").unwrap())
+        BufReader::new(File::open("tests/samples/olympic.sas7bdat").unwrap())
     }
 
     #[test]
     fn it_works() {
-        let mut reader = Reader::from_reader(get_file()).unwrap();
+        let reader = Reader::from_reader(get_file()).unwrap();
         println!("{:?}", reader.header);
         assert_eq!(2 + 2, 4);
     }
