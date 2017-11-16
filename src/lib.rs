@@ -16,28 +16,36 @@ use byte_reader::ByteReader;
 use encoding_rs::Encoding;
 
 #[derive(Debug)]
-struct Header {
-     byte_reader: ByteReader,
-     encoding: &'static Encoding,
-     page_len: usize,
-     page_count: usize,
-     //platform: Platform
-     offsets: Offsets,
-}
-
-#[derive(Debug)]
 struct Offsets {
     int: usize,
     page_start: usize,
     sub_header_ptr_len: usize,
 }
 
+/// A sas7bdat reader
+pub struct Reader<R> {
+    /// The inner reader
+    inner: R,
+    /// current page
+    page_num: usize,
+    /// a byte reader, taking endianness and word length into account
+    byte_reader: ByteReader,
+    /// encoding to get utf8 &str
+    encoding: &'static Encoding,
+    /// page length
+    page_len: usize,
+    /// total number of pages in the document
+    page_count: usize,
+    /// various offset depending on word length
+    offsets: Offsets,
+}
 
-impl Header {
+impl<R: Read> Reader<R> {
 
-    /// Parses bytes into a new Header
-    fn from_reader<R: Read>(read: &mut R) -> Result<Header> {
-
+    /// Creates a new sas7bdat `Reader` out of a regular reader
+    ///
+    /// Initialize by reading the header
+    pub fn from_reader(mut read: R) -> Result<Self> {
         let mut buf = [0u8; 1024];
         read.read_exact(&mut buf[0..1024])?;
         
@@ -103,52 +111,29 @@ impl Header {
         let page_len = byte_reader.read_i32(&buf[200 + a1..204 + a1]) as usize;
         let page_count = byte_reader.read_usize(&buf[204 + a1..208 + a1 + offsets.int]);
 
-        Ok(Header {
+        Ok(Reader {
+            inner: read,
             byte_reader: byte_reader,
             encoding: encoding,
             page_len: page_len,
             page_count: page_count,
             offsets: offsets,
-        })
-    }
-}
-
-/// A sas7bdat reader
-pub struct Reader<R> {
-    /// The inner reader
-    inner: R,
-    /// The file header
-    header: Header,
-    /// current page
-    page_num: usize,
-}
-
-impl<R: Read> Reader<R> {
-
-    /// Creates a new sas7bdat `Reader` out of a regular reader
-    ///
-    /// Initialize by reading the header
-    pub fn from_reader(mut reader: R) -> Result<Self> {
-        let header = Header::from_reader(&mut reader)?;
-        Ok(Reader {
-            inner: reader,
-            header: header,
             page_num: 0,
         })
     }
 
     /// Reads the next page
     pub fn next_page(&mut self) -> Result<Option<Page>> {
-        if self.page_num == self.header.page_count {
+        if self.page_num == self.page_count {
             return Ok(None);
         }
 
         // fill buffer
-        let mut buf = vec![0u8; self.header.page_len];
+        let mut buf = vec![0u8; self.page_len];
         self.inner.read_exact(&mut buf)?;
 
-        let byte_reader = &self.header.byte_reader;
-        let start = self.header.offsets.page_start;
+        let byte_reader = &self.byte_reader;
+        let start = self.offsets.page_start;
         let page_type = byte_reader.read_u16(&buf[start..]);
 
         let page = Page {};
