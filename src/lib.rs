@@ -15,14 +15,8 @@ use std::io::{Read};
 use byte_reader::ByteReader;
 use encoding_rs::Encoding;
 
-#[derive(Debug)]
-struct Offsets {
-    int: usize,
-    page_start: usize,
-    sub_header_ptr_len: usize,
-}
-
 /// A sas7bdat reader
+#[derive(Debug)]
 pub struct Reader<R> {
     /// The inner reader
     inner: R,
@@ -36,8 +30,12 @@ pub struct Reader<R> {
     page_len: usize,
     /// total number of pages in the document
     page_count: usize,
-    /// various offset depending on word length
-    offsets: Offsets,
+    /// word length
+    word_len: usize,
+    /// offset for start of page
+    page_start: usize,
+    /// sub header pointer length
+    sub_header_ptr_len: usize,
 }
 
 impl<R: Read> Reader<R> {
@@ -59,24 +57,16 @@ impl<R: Read> Reader<R> {
         }
 
         // alignments
-        let offsets = if buf[32] == 0x33 {
-            Offsets {
-                int: 4,
-                page_start: 32,
-                sub_header_ptr_len: 24,
-            }
+        let (word_len, page_start, sub_header_ptr_len) = if buf[32] == 0x33 {
+            (8, 32, 24)
         } else {
-            Offsets {
-                int: 0,
-                page_start: 16,
-                sub_header_ptr_len: 12,
-            }
+            (4, 16, 12)
         };
         let a1 = if buf[35] == 0x33 { 4 } else { 0 };
-        debug!("alignments: a1 {}, a2 {}", a1, offsets.int);
+        debug!("alignments: a1 {}, word len {}", a1, word_len);
 
         // endianness and pointer size
-        let byte_reader = ByteReader::from_bool(buf[37] == 0x01, offsets.int == 4);
+        let byte_reader = ByteReader::from_bool(buf[37] == 0x01, word_len == 8);
 
         if &buf[84..92] != b"SAS FILE" {
             bail!(ErrorKind::Invalid("SAS FILE"));
@@ -109,7 +99,7 @@ impl<R: Read> Reader<R> {
         }
 
         let page_len = byte_reader.read_i32(&buf[200 + a1..204 + a1]) as usize;
-        let page_count = byte_reader.read_usize(&buf[204 + a1..208 + a1 + offsets.int]);
+        let page_count = byte_reader.read_usize(&buf[204 + a1..204 + a1 + word_len]);
 
         Ok(Reader {
             inner: read,
@@ -117,7 +107,9 @@ impl<R: Read> Reader<R> {
             encoding: encoding,
             page_len: page_len,
             page_count: page_count,
-            offsets: offsets,
+            word_len: word_len,
+            page_start: page_start,
+            sub_header_ptr_len: sub_header_ptr_len,
             page_num: 0,
         })
     }
@@ -133,7 +125,7 @@ impl<R: Read> Reader<R> {
         self.inner.read_exact(&mut buf)?;
 
         let byte_reader = &self.byte_reader;
-        let start = self.offsets.page_start;
+        let start = self.page_start;
         let page_type = byte_reader.read_u16(&buf[start..]);
 
         let page = Page {};
@@ -162,7 +154,7 @@ mod tests {
     #[test]
     fn it_works() {
         let reader = Reader::from_reader(get_file()).unwrap();
-        println!("{:?}", reader.header);
+        println!("{:?}", reader);
         assert_eq!(2 + 2, 4);
     }
 }
